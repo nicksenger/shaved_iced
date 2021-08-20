@@ -1,0 +1,10 @@
+[package]
+name = "ping_pong"
+version = "0.1.0"
+authors = ["Nick Senger <dev@nsenger.com>"]
+edition = "2018"
+
+[dependencies]
+iced = { git = "https://github.com/hecrj/iced", features = ["tokio"] }
+shaved_iced = { path = "../.." }
+tokio = "1.0"

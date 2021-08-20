@@ -1,0 +1,15 @@
+[package]
+name = "shaved_iced"
+version = "0.1.0"
+authors = ["Nick Senger <dev@nsenger.com>"]
+edition = "2018"
+
+[dependencies]
+iced = { git = "https://github.com/hecrj/iced" }
+iced_futures = { git = "https://github.com/hecrj/iced" }
+iced_native = { git = "https://github.com/hecrj/iced" }
+
+[workspace]
+members = [
+    "examples/ping_pong"
+]
