@@ -6,9 +6,9 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
-iced = { git = "https://github.com/hecrj/iced" }
-iced_futures = { git = "https://github.com/hecrj/iced" }
-iced_native = { git = "https://github.com/hecrj/iced" }
+iced = { git = "https://github.com/nicksenger/iced", branch = "local-state" }
+iced_futures = { git = "https://github.com/nicksenger/iced", branch = "local-state" }
+iced_native = { git = "https://github.com/nicksenger/iced", branch = "local-state" }
 pin-project = "1"
 thiserror = "1"
 

@@ -5,6 +5,6 @@ authors = ["Nick Senger <dev@nsenger.com>"]
 edition = "2018"
 
 [dependencies]
-iced = { git = "https://github.com/hecrj/iced", features = ["tokio"] }
+iced = { git = "https://github.com/nicksenger/iced", branch = "local-state", features = ["tokio"] }
 shaved_iced = { path = "../..", features = ["test"] }
 tokio = { version = "1.0", features = ["macros", "time", "test-util"] }
