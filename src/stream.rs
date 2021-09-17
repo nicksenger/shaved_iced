@@ -25,7 +25,7 @@ pub struct State<U> {
 }
 
 impl<U> State<U> {
-    fn new(data: U) -> Self {
+    pub fn new(data: U) -> Self {
         Self {
             data: Arc::new(Mutex::new(data)),
         }
