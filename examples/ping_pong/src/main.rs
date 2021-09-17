@@ -3,7 +3,7 @@ use std::sync::Arc;
 use iced::futures::stream::BoxStream;
 use iced::futures::StreamExt;
 use iced::{
-    button, Align, Application, Button, Clipboard, Column, Command, Element, Settings,
+    button, Align, Application, Button, Column, Command, Element, Settings,
     Subscription, Text,
 };
 use shaved_iced::{self, combine_operators, Sender};
@@ -53,7 +53,7 @@ impl Application for Counter {
         .map(Message::ShavedIced)
     }
 
-    fn update(&mut self, message: Message, _clipboard: &mut Clipboard) -> Command<Message> {
+    fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::Serve(hit) => {
                 if let Some(sender) = &mut self.sender {
