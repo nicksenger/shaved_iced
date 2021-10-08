@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use iced::futures::stream::BoxStream;
-use iced::futures::StreamExt;
+use iced::futures::{SinkExt, StreamExt};
 use iced::{
-    button, Align, Application, Button, Column, Command, Element, Settings,
+    button, Alignment, Application, Button, Column, Command, Element, Settings,
     Subscription, Text,
 };
 use shaved_iced::{self, combine_operators, Sender};
@@ -57,7 +57,7 @@ impl Application for Counter {
         match message {
             Message::Serve(hit) => {
                 if let Some(sender) = &mut self.sender {
-                    sender.send(hit)
+                    let _ = sender.start_send_unpin(hit);
                 } else {
                     self.pending_hits.push(hit);
                 }
@@ -65,7 +65,9 @@ impl Application for Counter {
             // When the sender is ready we store it in our application state and send it the queued
             // messages that we've accumulated
             Message::ShavedIced(shaved_iced::Message::Ready(mut sender)) => {
-                self.pending_hits.drain(..).for_each(|m| sender.send(m));
+                self.pending_hits.drain(..).for_each(|m| {
+                    let _ = sender.start_send_unpin(m);
+                });
                 self.sender = Some(sender)
             }
             Message::ShavedIced(shaved_iced::Message::Update(hit)) => match hit {
@@ -85,7 +87,7 @@ impl Application for Counter {
     fn view(&mut self) -> Element<Message> {
         Column::new()
             .padding(20)
-            .align_items(Align::Center)
+            .align_items(Alignment::Center)
             .push(
                 Button::new(&mut self.ping_button, Text::new("Ping"))
                     .on_press(Message::Serve(Side::Ping)),
@@ -138,7 +140,7 @@ fn ping_operator(
     )
 }
 
-// This operator handles how we will respond to pongs (by sending a ping 3 seconds later)
+// This operator handles how we will respond to pongs (by sending a ping 2 seconds later)
 fn pong_operator(
     in_stream: iced::futures::stream::BoxStream<'static, (Arc<Side>, shaved_iced::State<()>)>,
 ) -> iced::futures::stream::BoxStream<'static, Side> {
@@ -163,34 +165,27 @@ fn get_root_operator() -> Box<
 > {
     // Operators are used map the stream of messages coming in to messages going out. The `combine_operators`
     // utility is provided so that you can compose operators
-    combine_operators(vec![Box::new(ping_operator), Box::new(pong_operator)])
+    combine_operators(ping_operator, pong_operator)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::get_root_operator;
     use super::ping_operator;
     use super::pong_operator;
     use super::Side;
 
-    use iced::futures::channel::mpsc;
-    use iced::futures::future;
     use iced::futures::{SinkExt, StreamExt};
+    use shaved_iced::{Error, Message};
 
     #[tokio::test]
-    async fn test_ping_operator() {
+    async fn test_ping_operator() -> Result<(), Error> {
         tokio::time::pause();
 
-        let (mut sender, receiver) = mpsc::channel::<Side>(100);
-        let fake_state = shaved_iced::State::new(());
+        let (mut sender, mut receiver, _) =
+            shaved_iced::test_connect((), |_, _| {}, ping_operator).await?;
 
-        let mut receiver = ping_operator(Box::pin(receiver.scan(fake_state, |state, message| {
-            future::ready(Some((Arc::new(message), state.clone())))
-        })));
-
-        let _ = sender.send(Side::Ping).await;
+        let _ = sender.start_send_unpin(Side::Ping);
 
         let timeout =
             tokio::time::timeout(std::time::Duration::from_secs(1), receiver.next()).await;
@@ -198,27 +193,25 @@ mod tests {
 
         let timeout =
             tokio::time::timeout(std::time::Duration::from_millis(1001), receiver.next()).await;
-        assert!(matches!(timeout, Ok(Some(Side::Pong))));
+        assert!(matches!(timeout, Ok(Some(Message::Update(Side::Pong)))));
 
-        let _ = sender.send(Side::Pong).await;
+        let _ = sender.start_send_unpin(Side::Pong);
 
         let timeout =
             tokio::time::timeout(std::time::Duration::from_secs(5000), receiver.next()).await;
         assert!(matches!(timeout, Err(_)));
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_pong_operator() {
+    async fn test_pong_operator() -> Result<(), Error> {
         tokio::time::pause();
 
-        let (mut sender, receiver) = mpsc::channel::<Side>(100);
-        let fake_state = shaved_iced::State::new(());
+        let (mut sender, mut receiver, _) =
+            shaved_iced::test_connect((), |_, _| {}, pong_operator).await?;
 
-        let mut receiver = pong_operator(Box::pin(receiver.scan(fake_state, |state, message| {
-            future::ready(Some((Arc::new(message), state.clone())))
-        })));
-
-        let _ = sender.send(Side::Pong).await;
+        let _ = sender.start_send_unpin(Side::Pong);
 
         let timeout =
             tokio::time::timeout(std::time::Duration::from_secs(1), receiver.next()).await;
@@ -226,44 +219,40 @@ mod tests {
 
         let timeout =
             tokio::time::timeout(std::time::Duration::from_millis(1001), receiver.next()).await;
-        assert!(matches!(timeout, Ok(Some(Side::Ping))));
+        assert!(matches!(timeout, Ok(Some(Message::Update(Side::Ping)))));
 
-        let _ = sender.send(Side::Ping).await;
+        let _ = sender.start_send_unpin(Side::Ping);
 
         let timeout =
             tokio::time::timeout(std::time::Duration::from_secs(5000), receiver.next()).await;
         assert!(matches!(timeout, Err(_)));
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_root_operator() {
+    async fn test_root_operator() -> Result<(), Error> {
         tokio::time::pause();
 
-        let (mut sender, receiver) = mpsc::channel::<Side>(100);
-        let fake_state = shaved_iced::State::new(());
-
-        let receiver =
-            get_root_operator()(Box::pin(receiver.scan(fake_state, |state, message| {
-                future::ready(Some((Arc::new(message), state.clone())))
-            })));
+        let (mut sender, receiver, _) =
+            shaved_iced::test_connect((), |_, _| {}, get_root_operator()).await?;
 
         let _ = sender.send(Side::Pong).await;
 
         let (pings, pongs) = receiver
-            .scan(sender, |sender, message| {
-                let _ = sender.try_send(message.clone());
-                future::ready(Some(message))
-            })
             .take_until(tokio::time::sleep(std::time::Duration::from_secs(200)))
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .fold((0, 0), |acc, message| match message {
-                Side::Ping => (acc.0 + 1, acc.1),
-                Side::Pong => (acc.0, acc.1 + 1),
+            .fold((0, 0), |(pings, pongs), message| match message {
+                Message::Update(Side::Ping) => (pings + 1, pongs),
+                Message::Update(Side::Pong) => (pings, pongs + 1),
+                _ => (pings, pongs),
             });
 
         assert_eq!(pings, 50);
         assert_eq!(pongs, 49);
+
+        Ok(())
     }
 }

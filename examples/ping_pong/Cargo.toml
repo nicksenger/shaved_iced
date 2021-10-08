@@ -6,5 +6,5 @@ edition = "2018"
 
 [dependencies]
 iced = { git = "https://github.com/hecrj/iced", features = ["tokio"] }
-shaved_iced = { path = "../.." }
+shaved_iced = { path = "../..", features = ["test"] }
 tokio = { version = "1.0", features = ["macros", "time", "test-util"] }

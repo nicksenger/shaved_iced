@@ -9,7 +9,7 @@ mod stream;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use iced_futures::futures::{self, channel, stream::BoxStream};
+use iced_futures::futures::{self, channel, stream::BoxStream, StreamExt};
 
 pub use stream::{Message, Sender, State};
 
@@ -17,7 +17,7 @@ pub use stream::{Message, Sender, State};
 ///
 /// * `initial_state`: some state which will be made available from within the `operator`
 /// * `update`: a function which may be used to update the provided `initial_state` in response
-///to messages coming out of the operated stream
+///to messages
 /// * `operator`: a function which consumes the stream of messages from the `Sender` and returns
 /// a new stream of messages to be fed back to the application
 pub fn connect<T, U>(
@@ -80,44 +80,70 @@ where
             operator,
         } = *self;
 
-        Sender::connect(initial_state, update, operator)
+        Sender::connect(initial_state, update, operator).1
     }
 }
 
-/// Combines a vec of `operator`s into a single `operator`
+/// Combines 2 `operator`s into a single `operator`
 pub fn combine_operators<T, U>(
-    operators: Vec<
-        Box<dyn FnOnce(BoxStream<'static, (Arc<T>, State<U>)>) -> BoxStream<'static, T> + 'static>,
-    >,
+    a: impl FnOnce(BoxStream<'static, (Arc<T>, State<U>)>) -> BoxStream<'static, T> + 'static,
+    b: impl FnOnce(BoxStream<'static, (Arc<T>, State<U>)>) -> BoxStream<'static, T> + 'static,
 ) -> Box<dyn FnOnce(BoxStream<'static, (Arc<T>, State<U>)>) -> BoxStream<'static, T>>
 where
     U: Clone + Send + Sync + 'static,
     T: Clone + Send + Sync + 'static,
 {
-    use channel::mpsc;
-    use futures::StreamExt;
+    use futures::SinkExt;
 
     Box::new(move |in_stream: BoxStream<'static, (Arc<T>, State<U>)>| {
-        let (senders, receivers): (
-            Vec<mpsc::UnboundedSender<(Arc<T>, State<U>)>>,
-            Vec<BoxStream<'static, T>>,
-        ) = operators
-            .into_iter()
-            .map(|operator| {
-                let (sender, receiver) = channel::mpsc::unbounded();
-                (sender, operator(Box::pin(receiver)))
-            })
-            .unzip();
+        let (sender_a, receiver_a) = {
+            let (sender, receiver) = channel::mpsc::unbounded();
+            (sender, a(Box::pin(receiver)))
+        };
 
-        let a = in_stream.scan(senders, |senders, x| {
-            for sender in senders {
-                let _ = sender.start_send(x.clone());
-            }
+        let (sender_b, receiver_b) = {
+            let (sender, receiver) = channel::mpsc::unbounded();
+            (sender, b(Box::pin(receiver)))
+        };
+
+        let sender = Box::pin(sender_a.fanout(sender_b));
+
+        let a = in_stream.scan(sender, |sender, x| {
+            let _ = sender.start_send_unpin(x);
             futures::future::ready(Some(None))
         });
 
-        let b = Box::pin(futures::stream::select_all(receivers).map(Option::Some));
+        let b = Box::pin(futures::stream::select(receiver_a, receiver_b).map(Option::Some));
 
         Box::pin(futures::stream::select(a, b).filter_map(futures::future::ready))
     })
+}
+
+#[cfg(feature = "test")]
+use thiserror::Error;
+
+#[cfg(feature = "test")]
+pub async fn test_connect<T, U>(
+    initial_state: U,
+    update: impl Fn(&mut U, T) + Send + Sync + 'static,
+    operator: impl FnOnce(BoxStream<'static, (Arc<T>, State<U>)>) -> BoxStream<'static, T> + 'static,
+) -> Result<(Sender<T>, BoxStream<'static, Message<T>>, State<U>), Error>
+where
+    U: Clone + 'static + Send + Sync,
+    T: Clone + 'static + Send + Sync,
+{
+    let (state, mut receiver) = Sender::connect(initial_state, update, operator);
+
+    if let Some(Message::Ready(sender)) = receiver.next().await {
+        Ok((sender, receiver, state))
+    } else {
+        Err(Error::ConnectionFailed)
+    }
+}
+
+#[cfg(feature = "test")]
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("connection failed")]
+    ConnectionFailed,
 }

@@ -9,8 +9,13 @@ resolver = "2"
 iced = { git = "https://github.com/hecrj/iced" }
 iced_futures = { git = "https://github.com/hecrj/iced" }
 iced_native = { git = "https://github.com/hecrj/iced" }
+pin-project = "1"
+thiserror = "1"
 
 [workspace]
 members = [
     "examples/ping_pong"
 ]
+
+[features]
+test = []
